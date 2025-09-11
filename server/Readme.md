@@ -1,3 +1,4 @@
+~~~shell
 EC2_server/
 ├── main.py                    # Flask 실행 진입점
 ├── requirements.txt           # Python 패키지 목록
@@ -38,3 +39,4 @@ EC2_server/
 └── utils/                     # 공용 유틸리티
     ├── email.py               # 이메일 전송 기능
     └── security.py            # 보안/비밀번호 해시 관련
+~~~

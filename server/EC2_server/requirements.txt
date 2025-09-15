@@ -1,9 +1,28 @@
-uvicorn[standard]
-python-multipart
-pydantic
-flask
-requests
-openpyxl    # Excel 불러오거나 쓸 경우 필요
-rdkit
-panda
-python-dotenv
+# Web
+flask>=3.0
+flask-cors>=4.0 ; optional
+
+# HTTP
+requests>=2.31
+
+# Data / ML / NLP
+pandas>=2.2
+scikit-learn>=1.4
+nltk>=3.9
+networkx>=3.3
+deep-translator>=1.11
+
+# Chem
+rdkit-pypi>=2022.9.5
+
+# DB (MySQL)
+pymysql>=1.1   # 또는 mysqlclient>=2.2 (시스템 빌드환경 필요)
+
+# File IO
+openpyxl>=3.1   # (CSV/JSON만 쓰면 제거 가능)
+
+# Env
+python-dotenv>=1.0
+
+gunicorn>=21.2        # 리눅스/서버 배포 시 Flask 앱 실행용
+gevent>=24.2.1        # gunicorn -k gevent (옵션)

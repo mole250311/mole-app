@@ -1,0 +1,11 @@
+CREATE TABLE chat_logs (
+    chat_id        INT AUTO_INCREMENT PRIMARY KEY,     -- 고유 채팅 메시지 ID
+    user_id        VARCHAR(20) NOT NULL,               -- users.user_id 참조
+    sender         ENUM('user', 'bot') NOT NULL,       -- 누가 보낸 메시지인가
+    message        TEXT NOT NULL,                      -- 실제 메시지 내용
+    timestamp      DATETIME DEFAULT CURRENT_TIMESTAMP, -- 전송 시각
+    session_id     VARCHAR(50),                        -- 채팅 세션 구분 (선택)
+    
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+        ON DELETE CASCADE
+);

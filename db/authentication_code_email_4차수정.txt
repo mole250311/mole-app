@@ -1,0 +1,168 @@
+from flask import Flask, request, jsonify
+import smtplib
+from email.mime.text import MIMEText
+import random
+import mysql.connector
+import re
+import hashlib
+import base64
+import os
+
+# --- Flask 앱 초기화 ---
+app = Flask(__name__)
+
+# --- 1. 서버 설정 (PyCharm 테스트용) ---
+# ⚠️ 중요: 이 부분에 당신의 실제 정보를 직접 입력하세요.
+# 실제 서비스 배포 시에는 보안을 위해 .env 파일을 사용해야 합니다.
+MAIL_PROVIDERS = {
+    'gmail': {
+        'server': "smtp.gmail.com", 
+        'port': 587,
+        'user': "YOUR_GMAIL_ADDRESS@gmail.com",      # 여기에 당신의 Gmail 주소 입력
+        'password': "YOUR_GMAIL_16_DIGIT_APP_PASSWORD" # 여기에 당신의 Gmail 앱 비밀번호 입력
+    },
+    'naver': {
+        'server': "smtp.naver.com", 
+        'port': 587,
+        'user': "YOUR_NAVER_ADDRESS@naver.com",      # 여기에 당신의 네이버 주소 입력
+        'password': "YOUR_NAVER_APP_PASSWORD"         # 여기에 당신의 네이버 앱 비밀번호 입력
+    }
+}
+# 기본으로 사용할 이메일 서비스를 선택합니다.
+ACTIVE_PROVIDER_NAME = 'gmail'
+ACTIVE_PROVIDER = MAIL_PROVIDERS[ACTIVE_PROVIDER_NAME]
+
+# 데이터베이스 접속 정보
+DB_CONFIG = {
+    'host': '127.0.0.1', 
+    'database': 'NuSchema',
+    'user': 'root', 
+    'password': 'YOUR_MYSQL_PASSWORD' # 여기에 당신의 MySQL 비밀번호 입력
+}
+# ---------------------------------------------------------
+
+EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9.+_-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
+def hash_password(password):
+    """비밀번호를 해싱하고 Salt를 생성합니다."""
+    salt_bytes = os.urandom(16)
+    hashed_bytes = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt_bytes, 100000, dklen=32)
+    salt_str = base64.b64encode(salt_bytes).decode('utf-8')
+    hashed_str = base64.b64encode(hashed_bytes).decode('utf-8')
+    return salt_str, hashed_str
+
+# --- 🚀 1단계: 인증 코드 요청 API ---
+@app.route('/request-password-reset', methods=['POST'])
+def request_password_reset():
+    """비밀번호 재설정을 위한 인증 코드를 발송합니다."""
+    data = request.get_json()
+    if not data or 'email' not in data:
+        return jsonify({"error": "요청 본문에 'email' 필드가 필요합니다."}), 400
+    
+    email = data['email']
+    if not EMAIL_REGEX.match(email):
+        return jsonify({"error": "유효하지 않은 이메일 형식입니다."}), 400
+
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT user_id FROM users WHERE email = %s", (email,))
+        if not cursor.fetchone():
+            print(f"가입되지 않은 이메일로 비밀번호 재설정 시도: {email}")
+            return jsonify({"message": "요청이 접수되었습니다. 가입된 이메일이라면 코드가 발송됩니다."}), 200
+
+        auth_code = str(random.randint(100000, 999999))
+        save_query = "INSERT INTO auth_codes (email, code, created_at) VALUES (%s, %s, CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE code = VALUES(code), created_at = CURRENT_TIMESTAMP"
+        cursor.execute(save_query, (email, auth_code))
+        conn.commit()
+
+    except mysql.connector.Error as err:
+        print(f"데이터베이스 오류: {err}")
+        return jsonify({"error": "서버 데이터베이스에 문제가 발생했습니다."}), 500
+    finally:
+        if 'conn' in locals() and conn.is_connected(): cursor.close(); conn.close()
+
+    try:
+        msg_body = f"안녕하세요.\n\n요청하신 비밀번호 재설정 인증 코드는 [{auth_code}] 입니다."
+        msg = MIMEText(msg_body)
+        msg['Subject'] = "[내 앱 이름] 비밀번호 재설정 코드 안내"
+        msg['From'] = ACTIVE_PROVIDER['user']
+        msg['To'] = email
+        with smtplib.SMTP(ACTIVE_PROVIDER['server'], ACTIVE_PROVIDER['port']) as server:
+            server.starttls(); server.login(ACTIVE_PROVIDER['user'], ACTIVE_PROVIDER['password']); server.send_message(msg)
+    except Exception as e:
+        print(f"이메일 발송 오류: {e}")
+        return jsonify({"error": "이메일 발송에 실패했습니다."}), 500
+
+    return jsonify({"message": "요청이 접수되었습니다. 가입된 이메일이라면 코드가 발송됩니다."}), 200
+
+# --- 🚀 2단계: 인증 코드 검증 API ---
+@app.route('/verify-reset-code', methods=['POST'])
+def verify_reset_code():
+    """발송된 인증 코드가 유효한지 검증만 합니다."""
+    data = request.get_json()
+    if not data or 'email' not in data or 'code' not in data:
+        return jsonify({"error": "요청 본문에 'email'과 'code' 필드가 모두 필요합니다."}), 400
+
+    email = data['email']
+    user_code = data['code']
+
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        verify_query = "SELECT email FROM auth_codes WHERE email = %s AND code = %s AND created_at > NOW() - INTERVAL 5 MINUTE"
+        cursor.execute(verify_query, (email, user_code))
+        
+        if cursor.fetchone():
+            return jsonify({"message": "인증에 성공했습니다."}), 200
+        else:
+            return jsonify({"error": "인증 코드가 유효하지 않거나 만료되었습니다."}), 400
+    except mysql.connector.Error as err:
+        print(f"데이터베이스 오류: {err}")
+        return jsonify({"error": "서버 데이터베이스에 문제가 발생했습니다."}), 500
+    finally:
+        if 'conn' in locals() and conn.is_connected(): cursor.close(); conn.close()
+
+# --- 🚀 3단계: 새 비밀번호 설정 API ---
+@app.route('/reset-password-with-code', methods=['POST'])
+def reset_password_with_code():
+    """인증 코드를 다시 검증하고 새 비밀번호로 최종 업데이트합니다."""
+    data = request.get_json()
+    if not data or 'email' not in data or 'code' not in data or 'new_password' not in data:
+        return jsonify({"error": "요청 본문에 'email', 'code', 'new_password' 필드가 모두 필요합니다."}), 400
+
+    email = data['email']
+    user_code = data['code']
+    new_password = data['new_password']
+
+    if len(new_password) < 6:
+        return jsonify({"error": "비밀번호는 6자 이상이어야 합니다."}), 400
+
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+
+        verify_query = "SELECT email FROM auth_codes WHERE email = %s AND code = %s AND created_at > NOW() - INTERVAL 5 MINUTE"
+        cursor.execute(verify_query, (email, user_code))
+        if not cursor.fetchone():
+            return jsonify({"error": "인증 코드가 유효하지 않거나 만료되었습니다."}), 400
+        
+        new_salt, new_hashed_password = hash_password(new_password)
+        update_query = "UPDATE users SET password = %s, salt = %s WHERE email = %s"
+        cursor.execute(update_query, (new_hashed_password, new_salt, email))
+        
+        delete_query = "DELETE FROM auth_codes WHERE email = %s"
+        cursor.execute(delete_query, (email,))
+        conn.commit()
+        
+        return jsonify({"message": "비밀번호가 성공적으로 변경되었습니다."}), 200
+
+    except mysql.connector.Error as err:
+        print(f"데이터베이스 오류: {err}")
+        return jsonify({"error": "서버 데이터베이스에 문제가 발생했습니다."}), 500
+    finally:
+        if 'conn' in locals() and conn.is_connected(): cursor.close(); conn.close()
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)

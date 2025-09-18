@@ -1,0 +1,11 @@
+CREATE TABLE notices (
+    notice_id      INT AUTO_INCREMENT PRIMARY KEY,         -- 공지사항 고유 ID
+    title          VARCHAR(200) NOT NULL,                  -- 공지 제목
+    content        TEXT NOT NULL,                          -- 공지 본문 내용
+    writer_id      VARCHAR(20),                            -- 작성자 ID (예: 관리자 ID)
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,     -- 작성 시각
+    updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+                       ON UPDATE CURRENT_TIMESTAMP,        -- 수정 시각
+    is_pinned      BOOLEAN DEFAULT FALSE,                  -- 상단 고정 여부
+    is_active      BOOLEAN DEFAULT TRUE                    -- 삭제/비활성화 여부
+);

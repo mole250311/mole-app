@@ -1,0 +1,35 @@
+# config.py
+
+class Config:
+    """
+    서버 환경 설정 값을 관리하는 클래스
+    ⚠️ 실제 서비스 배포 시에는 .env 파일과 os.getenv()를 사용하는 것이 안전합니다.
+    """
+    # --- 이메일 발송 설정 ---
+    MAIL_PROVIDERS = {
+        'gmail': {
+            'server': "smtp.gmail.com", 
+            'port': 587,
+            'user': "YOUR_GMAIL_ADDRESS@gmail.com",
+            'password': "YOUR_GMAIL_16_DIGIT_APP_PASSWORD"
+        },
+        'naver': {
+            'server': "smtp.naver.com", 
+            'port': 587,
+            'user': "YOUR_NAVER_ADDRESS@naver.com",
+            'password': "YOUR_NAVER_APP_PASSWORD"
+        }
+    }
+    ACTIVE_PROVIDER_NAME = 'gmail'
+
+    # --- 데이터베이스 설정 ---
+    DB_CONFIG = {
+        'host': '127.0.0.1', 
+        'database': 'NuSchema',
+        'user': 'root', 
+        'password': 'YOUR_MYSQL_PASSWORD'
+    }
+
+    # --- 기타 기존 설정들 ---
+    # SECRET_KEY = ...
+    # SQLALCHEMY_DATABASE_URI = ...

@@ -1,0 +1,92 @@
+# relay/reset_service.py
+import smtplib
+from email.mime.text import MIMEText
+import random
+import mysql.connector
+import hashlib
+import base64
+import os
+
+def hash_password(password):
+    """비밀번호를 해싱하고 Salt를 생성합니다."""
+    salt_bytes = os.urandom(16)
+    hashed_bytes = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt_bytes, 100000, dklen=32)
+    salt_str = base64.b64encode(salt_bytes).decode('utf-8')
+    hashed_str = base64.b64encode(hashed_bytes).decode('utf-8')
+    return salt_str, hashed_str
+
+def request_reset_code(email, db_config, mail_config):
+    """1단계: 비밀번호 재설정 코드를 요청하고 발송합니다."""
+    try:
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM users WHERE email = %s", (email,))
+        if not cursor.fetchone():
+            print(f"가입되지 않은 이메일로 비밀번호 재설정 시도: {email}")
+            return {"status": "success"}
+
+        auth_code = str(random.randint(100000, 999999))
+        save_query = "INSERT INTO auth_codes (email, code, created_at) VALUES (%s, %s, CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE code = VALUES(code), created_at = CURRENT_TIMESTAMP"
+        cursor.execute(save_query, (email, auth_code))
+        conn.commit()
+    except mysql.connector.Error as err:
+        print(f"데이터베이스 오류: {err}")
+        return {"status": "error", "message": "서버 데이터베이스에 문제가 발생했습니다."}
+    finally:
+        if 'conn' in locals() and conn.is_connected(): cursor.close(); conn.close()
+    
+    try:
+        msg_body = f"안녕하세요.\n\n요청하신 비밀번호 재설정 인증 코드는 [{auth_code}] 입니다."
+        msg = MIMEText(msg_body)
+        msg['Subject'] = "[내 앱 이름] 비밀번호 재설정 코드 안내"
+        msg['From'] = mail_config['user']
+        msg['To'] = email
+        with smtplib.SMTP(mail_config['server'], mail_config['port']) as server:
+            server.starttls(); server.login(mail_config['user'], mail_config['password']); server.send_message(msg)
+    except Exception as e:
+        print(f"이메일 발송 오류: {e}")
+        return {"status": "error", "message": "이메일 발송에 실패했습니다."}
+
+    return {"status": "success"}
+
+def verify_code_only(email, code, db_config):
+    """2단계: 인증 코드가 유효한지 검증만 합니다."""
+    try:
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+        verify_query = "SELECT email FROM auth_codes WHERE email = %s AND code = %s AND created_at > NOW() - INTERVAL 5 MINUTE"
+        cursor.execute(verify_query, (email, code))
+        if cursor.fetchone():
+            return {"status": "success"}
+        else:
+            return {"status": "fail", "message": "인증 코드가 유효하지 않거나 만료되었습니다."}
+    except mysql.connector.Error as err:
+        print(f"데이터베이스 오류: {err}")
+        return {"status": "error", "message": "서버 데이터베이스에 문제가 발생했습니다."}
+    finally:
+        if 'conn' in locals() and conn.is_connected(): cursor.close(); conn.close()
+
+def update_password_with_code(email, code, new_password, db_config):
+    """3단계: 코드를 재검증하고 비밀번호를 최종 업데이트합니다."""
+    try:
+        conn = mysql.connector.connect(**db_config)
+        cursor = conn.cursor()
+        verify_query = "SELECT email FROM auth_codes WHERE email = %s AND code = %s AND created_at > NOW() - INTERVAL 5 MINUTE"
+        cursor.execute(verify_query, (email, code))
+        if not cursor.fetchone():
+            return {"status": "fail", "message": "인증 코드가 유효하지 않거나 만료되었습니다."}
+        
+        new_salt, new_hashed_password = hash_password(new_password)
+        update_query = "UPDATE users SET password = %s, salt = %s WHERE email = %s"
+        cursor.execute(update_query, (new_hashed_password, new_salt, email))
+        
+        delete_query = "DELETE FROM auth_codes WHERE email = %s"
+        cursor.execute(delete_query, (email,))
+        conn.commit()
+        
+        return {"status": "success"}
+    except mysql.connector.Error as err:
+        print(f"데이터베이스 오류: {err}")
+        return {"status": "error", "message": "서버 데이터베이스에 문제가 발생했습니다."}
+    finally:
+        if 'conn' in locals() and conn.is_connected(): cursor.close(); conn.close()

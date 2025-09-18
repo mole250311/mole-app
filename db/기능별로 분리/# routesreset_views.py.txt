@@ -1,0 +1,76 @@
+# routes/reset_views.py
+
+from flask import Blueprint, request, jsonify, current_app
+from relay import reset_service # relay 폴더의 서비스 파일을 가져옵니다.
+import re
+
+bp = Blueprint('reset', __name__, url_prefix='/reset')
+
+EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9.+_-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
+# --- 🚀 1단계: 인증 코드 요청 API ---
+@bp.route('/request-password', methods=['POST'])
+def request_password_reset():
+    DB_CONFIG = current_app.config['DB_CONFIG']
+    MAIL_PROVIDERS = current_app.config['MAIL_PROVIDERS']
+    ACTIVE_PROVIDER_NAME = current_app.config['ACTIVE_PROVIDER_NAME']
+    ACTIVE_PROVIDER = MAIL_PROVIDERS[ACTIVE_PROVIDER_NAME]
+    
+    data = request.get_json()
+    if not data or 'email' not in data:
+        return jsonify(error="요청 본문에 'email' 필드가 필요합니다."), 400
+    
+    email = data['email']
+    if not EMAIL_REGEX.match(email):
+        return jsonify(error="유효하지 않은 이메일 형식입니다."), 400
+
+    result = reset_service.request_reset_code(email, DB_CONFIG, ACTIVE_PROVIDER)
+
+    if result['status'] == 'success':
+        return jsonify(message="요청이 접수되었습니다. 가입된 이메일이라면 코드가 발송됩니다."), 200
+    else:
+        return jsonify(error=result['message']), 500
+
+# --- 🚀 2단계: 인증 코드 검증 API ---
+@bp.route('/verify-code', methods=['POST'])
+def verify_reset_code():
+    DB_CONFIG = current_app.config['DB_CONFIG']
+    data = request.get_json()
+    if not data or 'email' not in data or 'code' not in data:
+        return jsonify(error="요청 본문에 'email'과 'code' 필드가 모두 필요합니다."), 400
+
+    email = data['email']
+    user_code = data['code']
+
+    result = reset_service.verify_code_only(email, user_code, DB_CONFIG)
+
+    if result['status'] == 'success':
+        return jsonify(message="인증에 성공했습니다."), 200
+    elif result['status'] == 'fail':
+        return jsonify(error=result['message']), 400
+    else: # 'error'
+        return jsonify(error=result['message']), 500
+
+# --- 🚀 3단계: 새 비밀번호 설정 API ---
+@bp.route('/reset-password', methods=['POST'])
+def reset_password_with_code():
+    DB_CONFIG = current_app.config['DB_CONFIG']
+    data = request.get_json()
+    if not data or 'email' not in data or 'code' not in data or 'new_password' not in data:
+        return jsonify(error="요청 본문에 'email', 'code', 'new_password' 필드가 모두 필요합니다."), 400
+
+    email = data['email']
+    user_code = data['code']
+    new_password = data['new_password']
+
+    if len(new_password) < 6:
+        return jsonify(error="비밀번호는 6자 이상이어야 합니다."), 400
+
+    result = reset_service.update_password_with_code(email, user_code, new_password, DB_CONFIG)
+
+    if result['status'] == 'success':
+        return jsonify(message="비밀번호가 성공적으로 변경되었습니다."), 200
+    elif result['status'] == 'fail':
+        return jsonify(error=result['message']), 400
+    else: # 'error'
+        return jsonify(error=result['message']), 500

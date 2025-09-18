@@ -1,0 +1,40 @@
+CREATE TABLE users (
+    user_id           VARCHAR(20) PRIMARY KEY,                 -- 고유 사용자 ID
+    username          VARCHAR(30)  NOT NULL UNIQUE,            -- 로그인 ID
+    password          VARCHAR(255) NOT NULL,                   -- 비밀번호
+    email             VARCHAR(100) NOT NULL UNIQUE,            -- 이메일
+    phone_number      VARCHAR(20)  NOT NULL UNIQUE,            -- 전화번호
+    birth_date        DATE,                                    -- 생년월일
+    school_name       VARCHAR(100),
+    department_name   VARCHAR(100),
+    auto_login        BOOLEAN DEFAULT FALSE,                   -- ⭐ 자동 로그인 여부
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP       -- 가입일시
+);
+CREATE TABLE user_profiles (
+    user_id           VARCHAR(20) PRIMARY KEY,
+    username          VARCHAR(30) NOT NULL,
+    student_id        VARCHAR(20) NOT NULL UNIQUE,
+    school_name       VARCHAR(100),
+    department_name   VARCHAR(100),
+    last_chapter_num  VARCHAR(20),
+    last_page_id      VARCHAR(20),
+    last_login        DATETIME,                                 -- ⭐ 마지막 로그인 시간
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+                         ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+);
+CREATE TABLE user_favorites (
+    id             INT AUTO_INCREMENT PRIMARY KEY,
+    user_id        VARCHAR(20) NOT NULL,           -- users.user_id 참조
+    chapter_num    VARCHAR(20) NOT NULL,           -- ⭐ 즐겨찾기 챕터 번호
+    page_id        VARCHAR(20),                    -- ⭐ 즐겨찾기 페이지 ID (선택)
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+        ON DELETE CASCADE,
+
+    UNIQUE(user_id, chapter_num, page_id)          -- 중복 즐겨찾기 방지
+);

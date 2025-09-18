@@ -1,0 +1,13 @@
+CREATE TABLE users (
+    user_id          INT AUTO_INCREMENT PRIMARY KEY,      -- 고유 사용자 ID (중복 불가)
+    username         VARCHAR(30)  NOT NULL UNIQUE,        -- 로그인 ID (중복 불가)
+    password         VARCHAR(255) NOT NULL,               -- 비밀번호 (중복 허용)
+    email            VARCHAR(100) NOT NULL UNIQUE,        -- 이메일 (중복 불가)
+    phone_number     VARCHAR(20)  NOT NULL UNIQUE,        -- 전화번호 (중복 불가)
+    birth_date       DATE,                                -- 생년월일 (예: 1999-04-21)
+    school_name      VARCHAR(100),                        -- 학교명
+    department_name  VARCHAR(100),                        -- 학과명
+    grade            TINYINT,                             -- 학년 (1~4)
+    created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,  -- 가입일시
+    last_login       DATETIME                             -- 마지막 로그인 시각
+);

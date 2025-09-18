@@ -1,0 +1,129 @@
+from flask import Flask, request, jsonify
+import smtplib
+from email.mime.text import MIMEText
+import random
+import mysql.connector
+
+# --- Flask 앱 초기화 ---
+app = Flask(__name__)
+
+# --- 1. 서버 설정 (이전과 동일) ---
+MAIL_PROVIDERS = {
+    'gmail': {
+        'server': "smtp.gmail.com",
+        'port': 587,
+        'user': "YOUR_GMAIL_ADDRESS@gmail.com",
+        'password': "YOUR_GMAIL_16_DIGIT_APP_PASSWORD"
+    },
+    'naver': {
+        'server': "smtp.naver.com",
+        'port': 587,
+        'user': "YOUR_NAVER_ADDRESS@naver.com",
+        'password': "YOUR_NAVER_APP_PASSWORD"
+    }
+}
+ACTIVE_PROVIDER_NAME = 'gmail'
+ACTIVE_PROVIDER = MAIL_PROVIDERS[ACTIVE_PROVIDER_NAME]
+
+DB_CONFIG = {
+    'host': '127.0.0.1',
+    'database': 'NuSchema',
+    'user': 'root',
+    'password': 'YOUR_MYSQL_PASSWORD'
+}
+# ---------------------------------------------------------
+
+@app.route('/send-auth-code', methods=['POST'])
+def send_auth_code():
+    """Unity 앱으로부터 이메일 주소를 받아 인증 코드를 발송하는 API"""
+    data = request.get_json()
+    if not data or 'email' not in data:
+        return jsonify({"error": "이메일 주소가 필요합니다."}), 400
+    
+    email = data['email']
+    auth_code = str(random.randint(100000, 999999)) # 실제 운영 시 난수 사용
+
+    # DB에 인증 코드 저장
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        save_query = """
+            INSERT INTO auth_codes (email, code, created_at)
+            VALUES (%s, %s, CURRENT_TIMESTAMP)
+            ON DUPLICATE KEY UPDATE code = VALUES(code), created_at = CURRENT_TIMESTAMP
+        """
+        cursor.execute(save_query, (email, auth_code))
+        conn.commit()
+    except mysql.connector.Error as err:
+        print(f"데이터베이스 오류: {err}")
+        return jsonify({"error": "서버 내부 오류가 발생했습니다."}), 500
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()
+
+    # SMTP를 통해 실제 이메일 발송
+    try:
+        msg_body = f"안녕하세요!\n\n요청하신 인증 코드는 아래와 같습니다.\n\n인증 코드: [{auth_code}]\n\n감사합니다."
+        msg = MIMEText(msg_body)
+        msg['Subject'] = "[내 앱 이름] 이메일 인증 코드 안내"
+        msg['From'] = ACTIVE_PROVIDER['user']
+        msg['To'] = email
+
+        with smtplib.SMTP(ACTIVE_PROVIDER['server'], ACTIVE_PROVIDER['port']) as server:
+            server.starttls()
+            server.login(ACTIVE_PROVIDER['user'], ACTIVE_PROVIDER['password'])
+            server.send_message(msg)
+            
+    except Exception as e:
+        print(f"이메일 발송 오류: {e}")
+        return jsonify({"error": "이메일 발송에 실패했습니다."}), 500
+
+    return jsonify({"message": f"인증 코드가 {ACTIVE_PROVIDER_NAME} 계정으로 성공적으로 발송되었습니다."}), 200
+
+# --- ✨ 새로 추가된 인증 코드 검증 API ✨ ---
+@app.route('/verify-code', methods=['POST'])
+def verify_code():
+    """Unity 앱으로부터 이메일과 코드를 받아 유효성을 검증하는 API"""
+    data = request.get_json()
+    if not data or 'email' not in data or 'code' not in data:
+        return jsonify({"error": "이메일과 인증 코드가 모두 필요합니다."}), 400
+
+    email = data['email']
+    user_code = data['code']
+
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+
+        # 1. DB에서 유효한 코드가 있는지 확인 (당신이 설계한 검증 쿼리)
+        verify_query = """
+            SELECT email FROM auth_codes 
+            WHERE email = %s AND code = %s AND created_at > NOW() - INTERVAL 5 MINUTE
+        """
+        cursor.execute(verify_query, (email, user_code))
+        result = cursor.fetchone() # 결과가 있으면 (email,) 튜플, 없으면 None
+
+        # 2. 결과에 따라 처리
+        if result:
+            # 3. 인증 성공 시, 보안을 위해 사용된 코드를 DB에서 삭제
+            delete_query = "DELETE FROM auth_codes WHERE email = %s"
+            cursor.execute(delete_query, (email,))
+            conn.commit()
+            
+            return jsonify({"message": "인증에 성공했습니다."}), 200
+        else:
+            # 코드가 일치하지 않거나 5분이 지나 만료된 경우
+            return jsonify({"error": "인증 코드가 유효하지 않거나 만료되었습니다."}), 400
+
+    except mysql.connector.Error as err:
+        print(f"데이터베이스 오류: {err}")
+        return jsonify({"error": "서버 내부 오류가 발생했습니다."}), 500
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()
+# -----------------------------------------
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)

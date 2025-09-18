@@ -1,0 +1,15 @@
+CREATE TABLE user_profiles (
+    user_id           INT PRIMARY KEY,                      -- users.user_id 참조
+    username          VARCHAR(30) NOT NULL,                 -- 조회 편의용 (중복 허용)
+    student_id        VARCHAR(20) NOT NULL UNIQUE,          -- 학번
+    school_name       VARCHAR(100),
+    department_name   VARCHAR(100),
+    last_chapter_id   INT,
+    last_page_number  INT,
+    updated_at        DATETIME DEFAULT CURRENT_TIMESTAMP
+                           ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+        ON DELETE CASCADE     -- users 삭제 시 profiles도 자동 삭제
+        ON UPDATE CASCADE     -- user_id가 변경되면 profiles도 따라감
+);

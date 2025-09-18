@@ -1,0 +1,441 @@
+using System;
+using System.Collections.Generic;
+using MySql.Data.MySqlClient;
+using System.Security.Cryptography;
+using System.Text;
+
+namespace ConsoleApp3
+{
+    internal class Program
+    {
+        // MySQL 서버 접속 정보 (실제 정보로 반드시 수정해야 합니다)
+        private const string connectionString = "Server=127.0.0.1;Database=NuSchema;Uid=root;Pwd=1234567890;";
+
+        static void Main(string[] args)
+        {
+            try
+            {
+                CreateTables();
+                Console.WriteLine("MySQL 데이터베이스 연결 성공!");
+            }
+            catch (MySqlException ex)
+            {
+                Console.WriteLine($"[오류] 데이터베이스 연결에 실패했습니다: {ex.Message}");
+                Console.WriteLine("연결 문자열(connectionString)을 확인해주세요.");
+                Console.ReadKey();
+                return;
+            }
+
+            while (true)
+            {
+                Console.WriteLine("\n[API 서버 DB 관리 도구 (MySQL)]");
+                Console.WriteLine("--- 조회 ---");
+                Console.WriteLine("[1] 사용자 리스트 조회");
+                Console.WriteLine("[2] 사용자별 퀴즈 풀이 로그 조회");
+                Console.WriteLine("[3] 사용자별 즐겨찾기 조회");
+                Console.WriteLine("[4] 전체 퀴즈 문제 조회");
+                Console.WriteLine("[5] 인증 코드 조회");
+                Console.WriteLine("[6] 공지사항 목록 보기");
+                Console.WriteLine("[7] 사용자별 전체 진행도 조회");
+                Console.WriteLine("--- 데이터 관리 ---");
+                Console.WriteLine("[8] 전체 샘플 데이터 삽입");
+                Console.WriteLine("[9] 공지사항 작성");
+                Console.WriteLine("[10] 사용자 삭제");
+                Console.WriteLine("[12] 사용자별 전체 진행도 수정");
+                Console.WriteLine("-----------------");
+                Console.WriteLine("[0] 종료");
+                Console.Write("선택: ");
+                string choice = Console.ReadLine();
+
+                switch (choice)
+                {
+                    case "1": ShowAllUsers(); break;
+                    case "2": ShowUserQuizLog(); break;
+                    case "3": ShowUserFavorites(); break;
+                    case "4": ShowAllQuizzes(); break;
+                    case "5": ShowAuthCodes(); break; // 함수 이름 변경
+                    case "6": ShowNotices(); break;
+                    case "7": ShowUserOverallProgress(); break;
+                    case "8": InsertAllSampleData(); break;
+                    case "9": WriteNotice(); break;
+                    case "10": DeleteUser(); break;
+                    case "12": UpdateUserOverallProgress(); break;
+                    case "0": return;
+                    default: Console.WriteLine("잘못된 입력입니다."); break;
+                }
+            }
+        }
+
+        static void CreateTables()
+        {
+            using (var conn = new MySqlConnection(connectionString))
+            {
+                conn.Open();
+                string createAllTables = @"
+                    CREATE TABLE IF NOT EXISTS users (
+                        user_no INT UNSIGNED NOT NULL UNIQUE AUTO_INCREMENT,
+                        user_id VARCHAR(50) PRIMARY KEY,
+                        username VARCHAR(50) NOT NULL,
+                        password VARCHAR(255) NOT NULL,
+                        salt VARCHAR(255) NOT NULL,
+                        email VARCHAR(100) NOT NULL UNIQUE,
+                        phone_number VARCHAR(20),
+                        birth_date DATE,
+                        grade VARCHAR(20),
+                        major VARCHAR(50),
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE TABLE IF NOT EXISTS quiz (
+                        quiz_id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+                        amino_acid VARCHAR(20), topic VARCHAR(50), question TEXT NOT NULL,
+                        options TEXT, answer VARCHAR(100) NOT NULL, grade VARCHAR(20)
+                    );
+                    CREATE TABLE IF NOT EXISTS quiz_log (    
+                        Progress_id INT PRIMARY KEY AUTO_INCREMENT,
+                        user_id VARCHAR(50) NOT NULL,    
+                        chapter VARCHAR(100) NOT NULL,    
+                        question_number INT NOT NULL,    
+                        status VARCHAR(20) NOT NULL,    
+                        answered_at DATETIME DEFAULT CURRENT_TIMESTAMP,    
+                        FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE);
+                    CREATE TABLE IF NOT EXISTS user_favorite (
+                        Favorite_id INT PRIMARY KEY AUTO_INCREMENT,
+                        user_id VARCHAR(50) NOT NULL, 
+                        chapter_id VARCHAR(100) NOT NULL,
+                        FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                    );
+                    /* --- 수정된 부분 ---
+                     * 테이블 이름을 auth_codes로 변경
+                     * expires_at을 created_at으로 변경하고 DEFAULT 값 설정
+                     */
+                    CREATE TABLE IF NOT EXISTS auth_codes (
+                        email VARCHAR(100) PRIMARY KEY,
+                        code VARCHAR(10) NOT NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE TABLE IF NOT EXISTS notices (
+                        notice_id INT PRIMARY KEY AUTO_INCREMENT,
+                        title VARCHAR(255) NOT NULL, content TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE TABLE IF NOT EXISTS overall_progress (    
+                        user_id VARCHAR(50) PRIMARY KEY,    
+                        total_solved INT DEFAULT 0,    
+                        total_progress_percent DECIMAL(5,1) DEFAULT 0.0,    
+                        FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE);
+                    CREATE TABLE IF NOT EXISTS user_progress (
+                        user_id VARCHAR(50) NOT NULL UNIQUE,
+                        progress INT NOT NULL DEFAULT 0,
+                        FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                    );";
+                var cmd = new MySqlCommand(createAllTables, conn);
+                cmd.ExecuteNonQuery();
+            }
+        }
+
+        static void InsertAllSampleData()
+        {
+            using (var conn = new MySqlConnection(connectionString))
+            {
+                conn.Open();
+                using (var transaction = conn.BeginTransaction())
+                {
+                    try
+                    {
+                        string salt;
+                        string hashedPassword = PasswordHasher.HashPassword("password123", out salt);
+                        var userCmd = new MySqlCommand(@"INSERT IGNORE INTO users (user_id, username, password, salt, email, phone_number, birth_date, grade, major) VALUES ('user01', '김철수', @pwd, @salt, 'test@example.com', '010-1234-5678', '1995-05-10', '1학년', '화학과');", conn, transaction);
+                        userCmd.Parameters.AddWithValue("@pwd", hashedPassword);
+                        userCmd.Parameters.AddWithValue("@salt", salt);
+                        userCmd.ExecuteNonQuery();
+                        string userId = "user01";
+
+                        var quizCmd = new MySqlCommand(@"INSERT IGNORE INTO quiz (amino_acid, topic, question, options, answer, grade) VALUES ('Glycine', '약어', 'Glycine의 한 글자 약어는 무엇인가요?', '[""A"", ""G"", ""G"", ""L""]', 'G', '1학년'); SELECT LAST_INSERT_ID();", conn, transaction);
+                        long quizId = Convert.ToInt64(quizCmd.ExecuteScalar());
+
+                        var logCmd = new MySqlCommand("INSERT IGNORE INTO quiz_log (user_id, quiz_id, is_correct) VALUES (@uid, @qid, true);", conn, transaction);
+                        logCmd.Parameters.AddWithValue("@uid", userId);
+                        logCmd.Parameters.AddWithValue("@qid", quizId);
+                        logCmd.ExecuteNonQuery();
+
+                        var favCmd = new MySqlCommand("INSERT IGNORE INTO user_favorite (user_id, chapter_id) VALUES (@uid, 'Valine');", conn, transaction);
+                        favCmd.Parameters.AddWithValue("@uid", userId);
+                        favCmd.ExecuteNonQuery();
+
+                        // --- 수정된 부분 ---
+                        var codeCmd = new MySqlCommand(@"INSERT IGNORE INTO auth_codes (email, code) VALUES ('test@example.com', '123456');", conn, transaction);
+                        codeCmd.ExecuteNonQuery();
+
+                        var noticeCmd = new MySqlCommand(@"INSERT IGNORE INTO notices (title, content) VALUES ('서비스 점검 안내', '오늘 밤 12시에 서비스 점검이 있습니다.');", conn, transaction);
+                        noticeCmd.ExecuteNonQuery();
+
+                        var overallProgressCmd = new MySqlCommand(@"INSERT IGNORE INTO user_progress (user_id, progress) VALUES (@uid, 75);", conn, transaction);
+                        overallProgressCmd.Parameters.AddWithValue("@uid", userId);
+                        overallProgressCmd.ExecuteNonQuery();
+
+                        transaction.Commit();
+                        Console.WriteLine("모든 샘플 데이터가 성공적으로 삽입되었습니다.");
+                    }
+                    catch (Exception ex)
+                    {
+                        transaction.Rollback();
+                        Console.WriteLine($"데이터 삽입 중 오류 발생: {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        static void ShowAllUsers()
+        {
+            using (var conn = new MySqlConnection(connectionString))
+            {
+                conn.Open();
+                var cmd = new MySqlCommand("SELECT user_no, user_id, username, email, phone_number, birth_date, grade, major, created_at FROM users", conn);
+                Console.WriteLine("\n--- 사용자 리스트 ---");
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        Console.WriteLine($"No: {reader["user_no"]}, ID: {reader["user_id"]}, 이름: {reader["username"]}, 이메일: {reader["email"]}, 전화번호: {reader["phone_number"]}, 생년월일: {reader["birth_date"]}, 학년: {reader["grade"]}, 전공: {reader["major"]}, 가입일: {reader["created_at"]}");
+                    }
+                }
+            }
+        }
+
+        static void ShowUserQuizLog()
+        {
+            Console.Write("로그를 조회할 사용자의 ID를 입력하세요: ");
+            string userId = Console.ReadLine()?.Trim();
+            if (string.IsNullOrEmpty(userId)) return;
+
+            using (var conn = new MySqlConnection(connectionString))
+            {
+                conn.Open();
+                var cmd = new MySqlCommand(@"
+                    SELECT q.question, q.answer, l.is_correct, l.answered_at
+                    FROM quiz_log l
+                    JOIN quiz q ON l.quiz_id = q.quiz_id
+                    WHERE l.user_id = @user_id", conn);
+                cmd.Parameters.AddWithValue("@user_id", userId);
+
+                Console.WriteLine($"\n--- [사용자 ID: {userId}] 퀴즈 풀이 로그 ---");
+                using (var reader = cmd.ExecuteReader())
+                {
+                    if (!reader.HasRows) Console.WriteLine("풀이 기록이 없습니다.");
+                    while (reader.Read())
+                    {
+                        Console.WriteLine($"문제: {reader["question"]}");
+                        Console.WriteLine($" ├ 정답: {reader["answer"]}");
+                        Console.WriteLine($" └ 결과: {(Convert.ToBoolean(reader["is_correct"]) ? "정답" : "오답")} ({reader["answered_at"]})");
+                        Console.WriteLine("--------------------");
+                    }
+                }
+            }
+        }
+
+        static void ShowUserFavorites()
+        {
+            Console.Write("즐겨찾기를 조회할 사용자의 ID를 입력하세요: ");
+            string userId = Console.ReadLine()?.Trim();
+            if (string.IsNullOrEmpty(userId)) return;
+
+            using (var conn = new MySqlConnection(connectionString))
+            {
+                conn.Open();
+                var cmd = new MySqlCommand("SELECT chapter_id FROM user_favorite WHERE user_id = @user_id", conn);
+                cmd.Parameters.AddWithValue("@user_id", userId);
+
+                Console.WriteLine($"\n--- [사용자 ID: {userId}] 즐겨찾기 목록 ---");
+                using (var reader = cmd.ExecuteReader())
+                {
+                    if (!reader.HasRows) Console.WriteLine("즐겨찾기한 챕터가 없습니다.");
+                    while (reader.Read())
+                    {
+                        Console.WriteLine($"- {reader["chapter_id"]}");
+                    }
+                }
+            }
+        }
+
+        static void ShowAllQuizzes()
+        {
+            using (var conn = new MySqlConnection(connectionString))
+            {
+                conn.Open();
+                var cmd = new MySqlCommand("SELECT * FROM quiz", conn);
+                Console.WriteLine("\n--- 전체 퀴즈 문제 목록 ---");
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        Console.WriteLine($"[ID: {reader["quiz_id"]}] {reader["question"]}");
+                        Console.WriteLine($"  - 카테고리: {reader["amino_acid"]} ({reader["topic"]}) | 대상: {reader["grade"]}");
+                        Console.WriteLine($"  - 보기: {reader["options"]} | 정답: {reader["answer"]}");
+                    }
+                }
+            }
+        }
+
+        // --- 수정된 부분 ---
+        static void ShowAuthCodes()
+        {
+            using (var conn = new MySqlConnection(connectionString))
+            {
+                conn.Open();
+                var cmd = new MySqlCommand("SELECT email, code, created_at FROM auth_codes", conn);
+                Console.WriteLine("\n--- 인증 코드 목록 ---");
+                using (var reader = cmd.ExecuteReader())
+                {
+                    if (!reader.HasRows) Console.WriteLine("저장된 인증 코드가 없습니다.");
+                    while (reader.Read())
+                    {
+                        Console.WriteLine($"이메일: {reader["email"]}, 코드: {reader["code"]}, 생성일: {reader["created_at"]}");
+                    }
+                }
+            }
+        }
+
+        static void ShowNotices()
+        {
+            using (var conn = new MySqlConnection(connectionString))
+            {
+                conn.Open();
+                var cmd = new MySqlCommand("SELECT notice_id, title, content, created_at FROM notices ORDER BY created_at DESC", conn);
+                Console.WriteLine("\n--- 공지사항 목록 ---");
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        Console.WriteLine($"[ID: {reader["notice_id"]}] {reader["title"]} ({reader["created_at"]})");
+                        Console.WriteLine($"  └ {reader["content"]}");
+                    }
+                }
+            }
+        }
+
+        static void WriteNotice()
+        {
+            Console.Write("공지사항 제목: ");
+            string title = Console.ReadLine();
+            Console.Write("공지사항 내용: ");
+            string content = Console.ReadLine();
+
+            using (var conn = new MySqlConnection(connectionString))
+            {
+                conn.Open();
+                var cmd = new MySqlCommand("INSERT INTO notices (title, content) VALUES (@title, @content)", conn);
+                cmd.Parameters.AddWithValue("@title", title);
+                cmd.Parameters.AddWithValue("@content", content);
+                cmd.ExecuteNonQuery();
+                Console.WriteLine("공지사항이 성공적으로 작성되었습니다.");
+            }
+        }
+
+        static void DeleteUser()
+        {
+            Console.Write("삭제할 사용자의 ID를 입력하세요: ");
+            string userId = Console.ReadLine()?.Trim();
+            if (string.IsNullOrEmpty(userId)) return;
+
+            using (var conn = new MySqlConnection(connectionString))
+            {
+                conn.Open();
+                var cmd = new MySqlCommand("DELETE FROM users WHERE user_id = @uid", conn);
+                cmd.Parameters.AddWithValue("@uid", userId);
+                int rows = cmd.ExecuteNonQuery();
+                if (rows > 0) Console.WriteLine("사용자가 삭제되었습니다.");
+                else Console.WriteLine("해당 ID의 사용자를 찾지 못했습니다.");
+            }
+        }
+
+        static void ShowUserOverallProgress()
+        {
+            Console.Write("전체 진행도를 조회할 사용자의 ID를 입력하세요: ");
+            string userId = Console.ReadLine()?.Trim();
+            if (string.IsNullOrEmpty(userId)) return;
+
+            using (var conn = new MySqlConnection(connectionString))
+            {
+                conn.Open();
+                var cmd = new MySqlCommand("SELECT progress FROM user_progress WHERE user_id = @user_id", conn);
+                cmd.Parameters.AddWithValue("@user_id", userId);
+
+                Console.WriteLine($"\n--- [{userId}] 사용자의 전체 진행도 ---");
+                var result = cmd.ExecuteScalar();
+                if (result != null && result != DBNull.Value)
+                {
+                    Console.WriteLine($"전체 진행도: {result}%");
+                }
+                else
+                {
+                    Console.WriteLine("해당 사용자의 진행도 기록이 없습니다.");
+                }
+            }
+        }
+
+        static void UpdateUserOverallProgress()
+        {
+            Console.Write("진행도를 수정할 사용자의 ID를 입력하세요: ");
+            string userId = Console.ReadLine()?.Trim();
+            if (string.IsNullOrEmpty(userId)) return;
+
+            Console.Write($"[{userId}] 사용자의 새로운 전체 진행도 (%)를 입력하세요: ");
+            if (!int.TryParse(Console.ReadLine(), out int progress) || progress < 0 || progress > 100)
+            {
+                Console.WriteLine("진행도는 0과 100 사이의 숫자여야 합니다.");
+                return;
+            }
+
+            using (var conn = new MySqlConnection(connectionString))
+            {
+                conn.Open();
+                var cmd = new MySqlCommand(@"
+                    INSERT INTO user_progress (user_id, progress) 
+                    VALUES (@user_id, @progress)
+                    ON DUPLICATE KEY UPDATE progress = VALUES(progress);", conn);
+                cmd.Parameters.AddWithValue("@user_id", userId);
+                cmd.Parameters.AddWithValue("@progress", progress);
+
+                int rowsAffected = cmd.ExecuteNonQuery();
+
+                if (rowsAffected > 0)
+                {
+                    Console.WriteLine($"사용자 [{userId}]의 전체 진행도가 {progress}%로 설정/수정되었습니다.");
+                }
+                else
+                {
+                    Console.WriteLine("진행도 설정에 실패했습니다. 사용자 ID가 존재하는지 확인해주세요.");
+                }
+            }
+        }
+
+        public static class PasswordHasher
+        {
+            public static string HashPassword(string password, out string salt)
+            {
+                byte[] saltBytes = new byte[16];
+                using (var rng = RandomNumberGenerator.Create())
+                {
+                    rng.GetBytes(saltBytes);
+                }
+                salt = Convert.ToBase64String(saltBytes);
+                using (var pbkdf2 = new Rfc2898DeriveBytes(password, saltBytes, 100000, HashAlgorithmName.SHA256))
+                {
+                    byte[] hash = pbkdf2.GetBytes(32);
+                    return Convert.ToBase64String(hash);
+                }
+            }
+
+            public static bool VerifyPassword(string password, string storedHash, string storedSalt)
+            {
+                byte[] saltBytes = Convert.FromBase64String(storedSalt);
+                using (var pbkdf2 = new Rfc2898DeriveBytes(password, saltBytes, 100000, HashAlgorithmName.SHA256))
+                {
+                    byte[] hash = pbkdf2.GetBytes(32);
+                    return Convert.ToBase64String(hash) == storedHash;
+                }
+            }
+        }
+    }
+}
+

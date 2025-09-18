@@ -1,0 +1,14 @@
+# route_table.py
+
+# --- 기존 import 구문들 ---
+# from routes import ...
+
+# --- ✨ 새로 만든 reset_views 파일을 import 합니다 ---
+from routes import reset_views
+
+def route_table(app):
+    # --- 기존 app.register_blueprint(...) 구문들 ---
+    # app.register_blueprint(...)
+
+    # --- ✨ 아래 라인을 추가하여 새 API 경로를 등록합니다 ---
+    app.register_blueprint(reset_views.bp)
